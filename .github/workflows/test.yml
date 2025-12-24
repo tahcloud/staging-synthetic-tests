@@ -10,6 +10,9 @@ on:
       - main
   pull_request:
 
+env:
+  UBI_TOKEN: ${{ secrets.UBI_TOKEN }}
+
 jobs:
   test:
     runs-on: ubicloud-standard-4
