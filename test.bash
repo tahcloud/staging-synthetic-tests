@@ -19,6 +19,6 @@ wait_for_ssh "vm-${SUFFIX}"
 
 ubi vm "${LOCATION}/vm-${SUFFIX}" ssh -- uptime
 
-ubi vm "${LOCATION}/vm-${SUFFIX}" destroy
+ubi vm "${LOCATION}/vm-${SUFFIX}" destroy -f
 
-ubi ps "${LOCATION}/subnet-${SUFFIX}" destroy
+ubi ps "${LOCATION}/subnet-${SUFFIX}" destroy -f
