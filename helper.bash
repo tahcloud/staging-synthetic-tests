@@ -8,7 +8,7 @@ wait_for_ssh() {
 
   echo "Waiting for SSH access to ${vm_name}..."
   while [ $attempt -lt $max_attempts ]; do
-    if ubi vm "${LOCATION}/${vm_name}" ssh -- echo "SSH OK"; then
+    if ubi vm "${LOCATION}/${vm_name}" ssh -i ~/.ssh/id_ed25519 -- echo "SSH OK"; then
       echo "SSH to ${vm_name} is ready!"
       return 0
     fi
