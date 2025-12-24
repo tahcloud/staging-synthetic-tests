@@ -9,6 +9,8 @@ on:
     branches:
       - main
   pull_request:
+  schedule:
+    - cron:  '0 */1 * * *'
 
 env:
   UBI_TOKEN: ${{ secrets.UBI_TOKEN }}
