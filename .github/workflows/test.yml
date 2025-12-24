@@ -13,6 +13,9 @@ on:
 env:
   UBI_TOKEN: ${{ secrets.UBI_TOKEN }}
   UBI_URL: ${{ secrets.UBI_URL }}
+  LOCATION: eu-central-h1
+  SUFFIX: ${{ github.run_id }}
+
 
 jobs:
   test:
@@ -23,10 +26,12 @@ jobs:
     - name: Check out code
       uses: actions/checkout@v6
 
-
     - name: Download ubi CLI
       run: |
         curl -L --output ubi.tar.gz https://github.com/ubicloud/cli/releases/latest/download/ubi-linux-amd64-1.1.0.tar.gz
         tar -xzf ubi.tar.gz
         sudo mv ubi /usr/local/bin
         ubi version
+
+    - name: Run synthetic tests
+      run: ./test.sh
