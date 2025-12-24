@@ -30,6 +30,11 @@ jobs:
       run: |
         ssh-keygen -t ed25519 -b 4096 -q -C "synthetics-${{ github.run_id }}" -N "" -f ~/.ssh/id_ed25519
 
+    - name: Configure SSH
+      run: |
+        echo -e "Host *\n  StrictHostKeyChecking accept-new" >> ~/.ssh/config
+        chmod 600 ~/.ssh/config
+
     - name: Download ubi CLI
       run: |
         curl -L --output ubi.tar.gz https://github.com/ubicloud/cli/releases/latest/download/ubi-linux-amd64-1.1.0.tar.gz
