@@ -13,7 +13,7 @@ ubi vm "${LOCATION}/vm-${SUFFIX}" create \
   --boot-image=ubuntu-noble \
   --private-subnet-id="subnet-${SUFFIX}" \
   --unix-user=ubi \
-  "$(cat ~/.ssh/id_ed25519.pub | tr -d '\n')"
+  "$(cat ~/.ssh/id_ed25519.pub)"
 
 wait_for_ssh "vm-${SUFFIX}"
 
