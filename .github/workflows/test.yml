@@ -38,4 +38,5 @@ jobs:
         ubi version
 
     - name: Run synthetic tests
-      run: ./test.sh
+      shell: bash
+      run: ./test.bash
