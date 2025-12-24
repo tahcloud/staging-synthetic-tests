@@ -3,7 +3,7 @@
 set -uex
 set -o pipefail
 
-source ./helper.sh
+source ./helper.bash
 
 ubi ps "${LOCATION}/subnet-${SUFFIX}" create
 
