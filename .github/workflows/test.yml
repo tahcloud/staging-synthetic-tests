@@ -12,6 +12,7 @@ on:
 
 env:
   UBI_TOKEN: ${{ secrets.UBI_TOKEN }}
+  UBI_URL: ${{ secrets.UBI_URL }}
 
 jobs:
   test:
