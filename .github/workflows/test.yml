@@ -15,6 +15,7 @@ on:
 env:
   UBI_TOKEN: ${{ secrets.UBI_TOKEN }}
   UBI_URL: ${{ secrets.UBI_URL }}
+  UBI_VERSION: 1.1.0
   LOCATION: eu-central-h1
   SUFFIX: ${{ github.run_id }}
 
@@ -37,12 +38,22 @@ jobs:
         echo -e "Host *\n  StrictHostKeyChecking accept-new" >> ~/.ssh/config
         chmod 600 ~/.ssh/config
 
+    - name: Cache ubi CLI
+      id: cache-ubi
+      uses: actions/cache@v4
+      with:
+        path: /usr/local/bin/ubi
+        key: ubi-linux-amd64-${{ env.UBI_VERSION }}
+
     - name: Download ubi CLI
+      if: steps.cache-ubi.outputs.cache-hit != 'true'
       run: |
-        curl -L --output ubi.tar.gz https://github.com/ubicloud/cli/releases/latest/download/ubi-linux-amd64-1.1.0.tar.gz
+        curl -L --output ubi.tar.gz https://github.com/ubicloud/cli/releases/latest/download/ubi-linux-amd64-${{ env.UBI_VERSION }}.tar.gz
         tar -xzf ubi.tar.gz
         sudo mv ubi /usr/local/bin
-        ubi version
+
+    - name: Verify ubi CLI
+      run: ubi version
 
     - name: Run synthetic tests
       shell: bash
