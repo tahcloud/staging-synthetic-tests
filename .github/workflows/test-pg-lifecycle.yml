@@ -1,0 +1,65 @@
+name: PostgreSQL Lifecycle Test
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      location:
+        description: 'PostgreSQL location'
+        required: false
+        default: 'eu-central-h1'
+      pg_version:
+        description: 'Initial PostgreSQL version'
+        required: false
+        default: '17'
+      pg_upgrade_version:
+        description: 'Upgrade target version'
+        required: false
+        default: '18'
+
+env:
+  UBI_TOKEN: ${{ secrets.UBI_TOKEN }}
+  UBI_URL: ${{ secrets.UBI_URL }}
+  UBI_VERSION: 1.1.0
+  PG_LOCATION: ${{ inputs.location || 'eu-central-h1' }}
+  PG_VERSION: ${{ inputs.pg_version || '17' }}
+  PG_UPGRADE_VERSION: ${{ inputs.pg_upgrade_version || '18' }}
+
+jobs:
+  test-pg-lifecycle:
+    name: PostgreSQL Lifecycle Test
+    runs-on: ubicloud-standard-2
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Cache ubi CLI
+        id: cache-ubi
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/bin/ubi
+          key: ubi-linux-amd64-${{ env.UBI_VERSION }}
+
+      - name: Download ubi CLI
+        if: steps.cache-ubi.outputs.cache-hit != 'true'
+        run: |
+          curl -L --output ubi.tar.gz https://github.com/ubicloud/cli/releases/latest/download/ubi-linux-amd64-${{ env.UBI_VERSION }}.tar.gz
+          tar -xzf ubi.tar.gz
+          sudo mv ubi /usr/local/bin
+
+      - name: Verify ubi CLI
+        run: ubi version
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Run PostgreSQL lifecycle test
+        run: |
+          chmod +x test_pg_lifecycle.bash
+          ./test_pg_lifecycle.bash
