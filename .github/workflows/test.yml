@@ -40,7 +40,7 @@ jobs:
 
     - name: Cache ubi CLI
       id: cache-ubi
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: /usr/local/bin/ubi
         key: ubi-linux-amd64-${{ env.UBI_VERSION }}
