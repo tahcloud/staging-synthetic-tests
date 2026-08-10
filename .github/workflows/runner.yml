@@ -1,0 +1,154 @@
+name: Provision Runner
+run-name: ${{ inputs.count }} x ${{ inputs.label }} for ${{ inputs.lifespan_minutes }}m
+
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: Runner count
+        required: true
+        type: number
+        default: 1
+      benchmark:
+        description: Execute a benchmark, benchmark runtime doesn't count towards lifespan
+        required: true
+        type: boolean
+        default: false
+      lifespan_minutes:
+        description: Runner lifespan in minutes. 0 for immediate termination
+        required: true
+        type: number
+        default: 0
+      label:
+        type: choice
+        description: Label
+        default: ubicloud-standard-2-ubuntu-2404
+        options:
+          - ubicloud-standard-2-ubuntu-2204
+          - ubicloud-standard-4-ubuntu-2204
+          - ubicloud-standard-8-ubuntu-2204
+          - ubicloud-standard-16-ubuntu-2204
+          - ubicloud-standard-30-ubuntu-2204
+          - ubicloud-standard-60-ubuntu-2204
+          - ubicloud-standard-2-ubuntu-2404
+          - ubicloud-standard-4-ubuntu-2404
+          - ubicloud-standard-8-ubuntu-2404
+          - ubicloud-standard-16-ubuntu-2404
+          - ubicloud-standard-30-ubuntu-2404
+          - ubicloud-standard-60-ubuntu-2404
+          - ubicloud-standard-2-arm-ubuntu-2204
+          - ubicloud-standard-4-arm-ubuntu-2204
+          - ubicloud-standard-8-arm-ubuntu-2204
+          - ubicloud-standard-16-arm-ubuntu-2204
+          - ubicloud-standard-30-arm-ubuntu-2204
+          - ubicloud-standard-60-arm-ubuntu-2204
+          - ubicloud-standard-2-arm-ubuntu-2404
+          - ubicloud-standard-4-arm-ubuntu-2404
+          - ubicloud-standard-8-arm-ubuntu-2404
+          - ubicloud-standard-16-arm-ubuntu-2404
+          - ubicloud-standard-30-arm-ubuntu-2404
+          - ubicloud-standard-60-arm-ubuntu-2404
+          - ubicloud-premium-2-ubuntu-2204
+          - ubicloud-premium-4-ubuntu-2204
+          - ubicloud-premium-8-ubuntu-2204
+          - ubicloud-premium-16-ubuntu-2204
+          - ubicloud-premium-30-ubuntu-2204
+          - ubicloud-premium-2-ubuntu-2404
+          - ubicloud-premium-4-ubuntu-2404
+          - ubicloud-premium-8-ubuntu-2404
+          - ubicloud-premium-16-ubuntu-2404
+          - ubicloud-premium-30-ubuntu-2404
+
+jobs:
+  generate-matrix:
+    runs-on: ubuntu-slim
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Set matrix
+        id: set-matrix
+        run: |
+          echo "matrix="$(echo [$(seq -s, 1 ${{ inputs.count }})])"" >> $GITHUB_OUTPUT
+
+  run:
+    name: runner ${{ matrix.index }}
+    needs: generate-matrix
+    runs-on: ${{ inputs.label }}
+    strategy:
+      matrix:
+        index: ${{fromJson(needs.generate-matrix.outputs.matrix)}}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: uname -mr
+        run: uname -mr
+
+      - name: lsb_release -a
+        run: lsb_release -a
+
+      - name: printenv
+        run: printenv
+
+      - name: Setup SSH access
+        uses: ubicloud/ssh-runner@v2
+        with:
+          public-ssh-key: ${{ secrets.OPERATOR_SSH_PUBLIC_KEYS }}
+          wait-minutes: ${{ inputs.lifespan_minutes }}
+
+      - name: Benchmark
+        if: ${{ inputs.benchmark }}
+        run: |
+          curl -sL https://yabs.sh | bash -s -- -r -w benchmark_results.json
+          echo "# YABS benchmark results" > benchmark_results.md
+          jq -r 'def markdown(key; value): if (value | type) == "object" then "## \(key)\n| " + (value | to_entries | map(.key) | join(" | ")) + " |\n| " + (value | to_entries | map("---") | join(" | ")) + " |\n| " + (value | to_entries | map(.value | tostring) | join(" | ")) + " |" elif (value | type) == "array" and (value | length > 0 and (.[0] | type) == "object") then "## \(key)\n| " + (value[0] | to_entries | map(.key) | join(" | ")) + " |\n| " + (value[0] | to_entries | map("---") | join(" | ")) + " |\n" + (value | map("| " + (to_entries | map(.value | tostring) | join(" | ")) + " |") | join("\n")) elif (value | type) == "array" then "## \(key)\n" + (value | map(markdown("Item"; .)) | join("\n")) else "### \(key)\n```\n\(value)\n```" end; to_entries | map(markdown(.key; .value)) | join("\n")' benchmark_results.json >> benchmark_results.md
+          cat benchmark_results.md >> $GITHUB_STEP_SUMMARY
+
+
+  generate-summary:
+    runs-on: ubuntu-slim
+    needs: [generate-matrix, run]
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/github-script@v8
+        id: check-queue-time
+        with:
+          script: |
+            github
+              .paginate("GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}/jobs", {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: context.runId,
+                attempt_number: ${{ github.run_attempt }},
+              })
+              .then((jobs) => {
+                const runnerJobs = jobs.filter((job) => job.name.startsWith("runner"));
+                const queueTimes = [];
+                const runnerTable = [
+                  [{data: 'Job', header: true}, {data: 'Runner', header: true}, {data: 'Queue Time', header: true}],
+                  ...runnerJobs.map((job) => {
+                    const queueTime = (new Date(job.started_at) - new Date(job.created_at)) / 1000;
+                    queueTimes.push(queueTime);
+                    return [job.name, job.runner_name, `${queueTime} seconds`];
+                  }),
+                ];
+                const sortedQueueTimes = queueTimes.sort((a, b) => a - b);
+                const summaryTable = [
+                  ["Label", "${{ inputs.label }}"],
+                  ["Count", "${{ inputs.count }} runners"],
+                  ["Average", `${(sortedQueueTimes.reduce((a, b) => a + b, 0) / queueTimes.length).toFixed(2)} seconds`],
+                  ["Min", `${sortedQueueTimes[0]} seconds`],
+                  ["Max", `${sortedQueueTimes[sortedQueueTimes.length - 1]} seconds`],
+                  ["P50", `${sortedQueueTimes[Math.ceil(queueTimes.length * 0.5) - 1]} seconds`],
+                  ["P90", `${sortedQueueTimes[Math.ceil(queueTimes.length * 0.9) - 1]} seconds`],
+                  ["P99", `${sortedQueueTimes[Math.ceil(queueTimes.length * 0.99) - 1]} seconds`],
+                ];
+                core.summary
+                  .addHeading("Summary :bar_chart:")
+                  .addTable(summaryTable)
+                  .addHeading("Details :stopwatch:")
+                  .addTable(runnerTable)
+                  .write();
+              });
