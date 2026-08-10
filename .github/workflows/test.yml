@@ -1,60 +1,43 @@
 name: Synthetics
 
-permissions:
-  contents: read
-
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - main
-  pull_request:
-  schedule:
-    - cron:  '*/10 * * * *'
+    branches: [ enes/test-cache ]
 
 env:
-  UBI_TOKEN: ${{ secrets.UBI_TOKEN }}
-  UBI_URL: ${{ secrets.UBI_URL }}
-  UBI_VERSION: 1.1.0
-  LOCATION: eu-central-h1
-  SUFFIX: ${{ github.run_id }}
-
+  FILENAME: 1GB.bin
 
 jobs:
-  test:
+  save:
     runs-on: ubicloud-standard-4
-    timeout-minutes: 25
-
     steps:
-    - name: Check out code
-      uses: actions/checkout@v6
+      - name: download hetzner test file
+        run: |
+          sudo apt-get update && sudo apt-get install -y aria2
+          aria2c -x 10 "https://fsn1-speed.hetzner.com/${{ env.FILENAME }}"
 
-    - name: Generate SSH Key
-      run: |
-        ssh-keygen -t ed25519 -b 4096 -q -C "synthetics-${{ github.run_id }}" -N "" -f ~/.ssh/id_ed25519
+      - uses: actions/cache/save@v6
+        with:
+          path: ${{ env.FILENAME }}
+          key: cache-${{ env.FILENAME }}-${{ github.run_id }}
 
-    - name: Configure SSH
-      run: |
-        echo -e "Host *\n  StrictHostKeyChecking accept-new" >> ~/.ssh/config
-        chmod 600 ~/.ssh/config
+      - name: Print cache proxy logs
+        if: always()
+        run: sudo cat /var/log/cacheproxy.log
 
-    - name: Cache ubi CLI
-      id: cache-ubi
-      uses: actions/cache@v4
-      with:
-        path: /usr/local/bin/ubi
-        key: ubi-linux-amd64-${{ env.UBI_VERSION }}
+  restore:
+    needs: save
+    strategy:
+      matrix:
+        index: [1]
+    runs-on: ubicloud-standard-4
+    name: restore ${{ matrix.index }}
+    steps:
+      - uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.FILENAME }}
+          key: cache-${{ env.FILENAME }}-${{ github.run_id }}
 
-    - name: Download ubi CLI
-      if: steps.cache-ubi.outputs.cache-hit != 'true'
-      run: |
-        curl -L --output ubi.tar.gz https://github.com/ubicloud/cli/releases/latest/download/ubi-linux-amd64-${{ env.UBI_VERSION }}.tar.gz
-        tar -xzf ubi.tar.gz
-        sudo mv ubi /usr/local/bin
-
-    - name: Verify ubi CLI
-      run: ubi version
-
-    - name: Run synthetic tests
-      shell: bash
-      run: ./test.bash
+      - name: Print cache proxy logs
+        if: always()
+        run: sudo cat /var/log/cacheproxy.log
