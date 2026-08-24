@@ -60,7 +60,12 @@ jobs:
       - name: Set matrix
         id: set-matrix
         run: |
-          echo "matrix=[$(seq -s, 1 ${{ inputs.count || 1 }})]" >> "$GITHUB_OUTPUT"
+          count=${{ inputs.count || 1 }}
+          if [ "$count" -lt 1 ] || [ "$count" -gt 256 ]; then
+            echo "::error::count must be between 1 and 256, got $count"
+            exit 1
+          fi
+          echo "matrix=[$(seq -s, 1 "$count")]" >> "$GITHUB_OUTPUT"
 
   dns-stress:
     name: dns stress ${{ matrix.index }}
@@ -96,7 +101,7 @@ jobs:
         run: ./dns_stress.bash
 
       - name: Diagnostics on failure
-        if: failure()
+        if: failure() || cancelled()
         run: |
           RESOLVER=$(awk '/^nameserver/ {print $2; exit}' /run/systemd/resolve/resolv.conf || true)
           dig +time=2 +tries=1 "@${RESOLVER}" www.google.com A || true
@@ -110,6 +115,7 @@ jobs:
         with:
           name: dns-stress-${{ matrix.index }}
           path: dns-stress-out/
+          overwrite: true
 
   aggregate:
     runs-on: ubuntu-slim
@@ -122,19 +128,28 @@ jobs:
           path: all
 
       - name: Aggregate
+        env:
+          MATRIX: ${{ needs.generate-matrix.outputs.matrix }}
+          STRESS_RESULT: ${{ needs.dns-stress.result }}
         run: |
           {
-            echo "# DNS stress aggregate"
+            echo "# DNS stress aggregate (dns-stress job result: ${STRESS_RESULT})"
             echo "| runner | scenario | sent | completed | lost | avg latency (s) |"
             echo "| --- | --- | --- | --- | --- | --- |"
-            for f in all/dns-stress-*/*.out; do
-              [ -e "$f" ] || continue
-              runner=$(basename "$(dirname "$f")")
-              scenario=$(basename "$f" .out)
-              sent=$(awk '/Queries sent:/ {print $3}' "$f")
-              completed=$(awk '/Queries completed:/ {print $3}' "$f")
-              lost=$(awk '/Queries lost:/ {print $3}' "$f")
-              avg=$(awk '/Average Latency/ {print $4; exit}' "$f")
-              echo "| ${runner} | ${scenario} | ${sent:-n/a} | ${completed:-n/a} | ${lost:-n/a} | ${avg:-n/a} |"
+            for i in $(tr -d '[]' <<< "$MATRIX" | tr ',' ' '); do
+              found=0
+              for f in "all/dns-stress-${i}"/*.out; do
+                [ -e "$f" ] || continue
+                found=1
+                scenario=$(basename "$f" .out)
+                sent=$(awk '/Queries sent:/ {print $3}' "$f")
+                completed=$(awk '/Queries completed:/ {print $3}' "$f")
+                lost=$(awk '/Queries lost:/ {print $3}' "$f")
+                avg=$(awk '/Average Latency/ {print $4; exit}' "$f")
+                echo "| dns-stress-${i} | ${scenario} | ${sent:-n/a} | ${completed:-n/a} | ${lost:-n/a} | ${avg:-n/a} |"
+              done
+              if [ "$found" -eq 0 ]; then
+                echo "| dns-stress-${i} | no stats: job failed before dnsperf | n/a | n/a | n/a | n/a |"
+              fi
             done
           } >> "$GITHUB_STEP_SUMMARY"
