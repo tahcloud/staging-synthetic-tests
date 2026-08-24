@@ -1,10 +1,16 @@
 name: DNS Stress
-run-name: ${{ inputs.count }} x ${{ inputs.label }}, ${{ inputs.duration_seconds }}s at ${{ inputs.qps }}+${{ inputs.unique_qps }} qps
+run-name: ${{ inputs.count || 1 }} x ${{ inputs.label || 'ubicloud-standard-2-ubuntu-2404' }}, ${{ inputs.duration_seconds || 60 }}s at ${{ inputs.qps || 200 }}+${{ inputs.unique_qps || 50 }} qps
 
 permissions:
   contents: read
 
 on:
+  # The push trigger doubles as the baseline trigger while this file only
+  # exists on the dns-stress branch: workflow_dispatch registers a workflow
+  # only once the file reaches the default branch. Drop it after merge.
+  push:
+    branches:
+      - dns-stress
   workflow_dispatch:
     inputs:
       count:
@@ -54,12 +60,12 @@ jobs:
       - name: Set matrix
         id: set-matrix
         run: |
-          echo "matrix=[$(seq -s, 1 ${{ inputs.count }})]" >> "$GITHUB_OUTPUT"
+          echo "matrix=[$(seq -s, 1 ${{ inputs.count || 1 }})]" >> "$GITHUB_OUTPUT"
 
   dns-stress:
     name: dns stress ${{ matrix.index }}
     needs: generate-matrix
-    runs-on: ${{ inputs.label }}
+    runs-on: ${{ inputs.label || 'ubicloud-standard-2-ubuntu-2404' }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -82,9 +88,9 @@ jobs:
 
       - name: DNS stress
         env:
-          DURATION: ${{ inputs.duration_seconds }}
-          QPS: ${{ inputs.qps }}
-          UNIQUE_QPS: ${{ inputs.unique_qps }}
+          DURATION: ${{ inputs.duration_seconds || 60 }}
+          QPS: ${{ inputs.qps || 200 }}
+          UNIQUE_QPS: ${{ inputs.unique_qps || 50 }}
           RUN_TAG: ${{ github.run_id }}-${{ matrix.index }}
           OUT_DIR: dns-stress-out
         run: ./dns_stress.bash
