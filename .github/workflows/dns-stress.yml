@@ -89,7 +89,13 @@ jobs:
       - name: Install dnsperf
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq dnsperf dnsutils
+          sudo apt-get install -y -qq dnsperf dnsutils openssh-server
+
+      - name: Network health
+        env:
+          RUN_TAG: ${{ github.run_id }}-${{ matrix.index }}
+          OUT_DIR: dns-stress-out
+        run: ./net_health.bash
 
       - name: DNS stress
         env:
