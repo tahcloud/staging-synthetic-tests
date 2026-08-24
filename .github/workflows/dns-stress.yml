@@ -1,0 +1,134 @@
+name: DNS Stress
+run-name: ${{ inputs.count }} x ${{ inputs.label }}, ${{ inputs.duration_seconds }}s at ${{ inputs.qps }}+${{ inputs.unique_qps }} qps
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: Runner count (1 = single-runner mode)
+        required: true
+        type: number
+        default: 1
+      label:
+        type: choice
+        description: Label
+        default: ubicloud-standard-2-ubuntu-2404
+        options:
+          - ubicloud-standard-2-ubuntu-2204
+          - ubicloud-standard-4-ubuntu-2204
+          - ubicloud-standard-8-ubuntu-2204
+          - ubicloud-standard-2-ubuntu-2404
+          - ubicloud-standard-4-ubuntu-2404
+          - ubicloud-standard-8-ubuntu-2404
+          - ubicloud-standard-2-arm-ubuntu-2204
+          - ubicloud-standard-4-arm-ubuntu-2204
+          - ubicloud-standard-2-arm-ubuntu-2404
+          - ubicloud-standard-4-arm-ubuntu-2404
+          - ubicloud-premium-2-ubuntu-2404
+          - ubicloud-premium-4-ubuntu-2404
+      duration_seconds:
+        description: Stress duration per runner (seconds)
+        required: true
+        type: number
+        default: 60
+      qps:
+        description: Cached-name queries per second per runner
+        required: true
+        type: number
+        default: 200
+      unique_qps:
+        description: Cache-miss (upstream) queries per second per runner
+        required: true
+        type: number
+        default: 50
+
+jobs:
+  generate-matrix:
+    runs-on: ubuntu-slim
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Set matrix
+        id: set-matrix
+        run: |
+          echo "matrix=[$(seq -s, 1 ${{ inputs.count }})]" >> "$GITHUB_OUTPUT"
+
+  dns-stress:
+    name: dns stress ${{ matrix.index }}
+    needs: generate-matrix
+    runs-on: ${{ inputs.label }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        index: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Resolver diagnostics
+        run: |
+          cat /etc/resolv.conf
+          cat /run/systemd/resolve/resolv.conf || true
+          resolvectl status || true
+
+      - name: Install dnsperf
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq dnsperf dnsutils
+
+      - name: DNS stress
+        env:
+          DURATION: ${{ inputs.duration_seconds }}
+          QPS: ${{ inputs.qps }}
+          UNIQUE_QPS: ${{ inputs.unique_qps }}
+          RUN_TAG: ${{ github.run_id }}-${{ matrix.index }}
+          OUT_DIR: dns-stress-out
+        run: ./dns_stress.bash
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          RESOLVER=$(awk '/^nameserver/ {print $2; exit}' /run/systemd/resolve/resolv.conf || true)
+          dig +time=2 +tries=1 "@${RESOLVER}" www.google.com A || true
+          dig +time=2 +tries=1 "@${RESOLVER}" www.google.com AAAA || true
+          dig +time=2 +tries=1 @8.8.8.8 www.google.com A || true
+          ss -su || true
+
+      - name: Upload outputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dns-stress-${{ matrix.index }}
+          path: dns-stress-out/
+
+  aggregate:
+    runs-on: ubuntu-slim
+    needs: [generate-matrix, dns-stress]
+    if: always()
+    steps:
+      - name: Download outputs
+        uses: actions/download-artifact@v8
+        with:
+          path: all
+
+      - name: Aggregate
+        run: |
+          {
+            echo "# DNS stress aggregate"
+            echo "| runner | scenario | sent | completed | lost | avg latency (s) |"
+            echo "| --- | --- | --- | --- | --- | --- |"
+            for f in all/dns-stress-*/*.out; do
+              [ -e "$f" ] || continue
+              runner=$(basename "$(dirname "$f")")
+              scenario=$(basename "$f" .out)
+              sent=$(awk '/Queries sent:/ {print $3}' "$f")
+              completed=$(awk '/Queries completed:/ {print $3}' "$f")
+              lost=$(awk '/Queries lost:/ {print $3}' "$f")
+              avg=$(awk '/Average Latency/ {print $4; exit}' "$f")
+              echo "| ${runner} | ${scenario} | ${sent:-n/a} | ${completed:-n/a} | ${lost:-n/a} | ${avg:-n/a} |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
